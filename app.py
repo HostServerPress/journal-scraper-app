@@ -7,6 +7,7 @@ import pandas as pd
 from io import BytesIO
 
 # --- All of our perfected data extraction and scraping functions ---
+# --- (These are all included and require no changes) ---
 def extract_journal_name(soup):
     journal_meta = soup.find('meta', attrs={'name': 'citation_journal_title'})
     if journal_meta: return journal_meta['content']
@@ -167,7 +168,13 @@ def discover_article_links(toc_url):
 # --- STREAMLIT USER INTERFACE ---
 st.set_page_config(page_title="Journal Data Extractor", layout="wide")
 st.title("Journal Data Extractor")
-st.write("This tool automates data collection from journals. You can add multiple batches, validate the DOIs, and download the combined data.")
+st.markdown("""
+Welcome to the Journal Data Extractor! This tool is designed to streamline the process of collecting academic information from journal websites. 
+- **Two Powerful Modes:** Scrape data by either uploading an Excel file containing a list of URLs, or by pasting one or more 'Table of Contents' links directly.
+- **Accumulate Data:** Add multiple batches of articles to a single session. The results are combined for you.
+- **Validate DOIs:** Use the built-in validator to check if the scraped DOIs correctly lead to the article webpage.
+- **Download Everything:** Export your complete, cleaned, and numbered dataset to a single Excel file at any time.
+""")
 
 # Initialize all session state variables
 if 'all_results' not in st.session_state: st.session_state.all_results = []
@@ -218,8 +225,52 @@ def display_summary(summary):
             for url in summary['failed_links']: st.write(url)
 
 # --- UI Tabs ---
-tab1, tab2, tab3 = st.tabs(["Upload Excel File", "Paste Volume URLs", "DOI Validator"])
+# --- IMPROVEMENT: Reordered tabs to put User Manual first ---
+tab1, tab2, tab3, tab4 = st.tabs(["User Manual", "Upload Excel File", "Paste Volume URLs", "DOI Validator"])
+
 with tab1:
+    st.header("How to Use This Tool")
+    st.markdown("""
+    This guide explains how to use the different features of the Journal Data Extractor.
+
+    ### **Collecting Data**
+    You can collect data in two ways. You can use both methods in the same session, and all results will be combined.
+
+    **1. Upload Excel File Tab**
+    *   **Purpose:** Process a large number of links at once from a file.
+    *   **Instructions:**
+        *   Create an Excel file (`.xlsx` or `.xls`).
+        *   In the first column, use the exact header `Website Link`.
+        *   Paste all your URLs in this column. You can mix single article links and "Volume" / "Full Issue" links.
+        *   Upload the file and click "Generate from Excel File".
+
+    **2. Paste Volume URLs Tab**
+    *   **Purpose:** Quickly scrape one or more full journal issues.
+    *   **Instructions:**
+        *   Find the "Volume" or "Full Issue" page for the journal volumes you want to scrape.
+        *   Paste one or more of these URLs into the text box. Each URL must be on a new line.
+        *   Click "Generate from Pasted URLs".
+
+    ### **Validating Data**
+    After you have scraped some articles, you can check if their DOIs are correct.
+
+    **DOI Validator Tab**
+    *   **Purpose:** Check if the DOI for each article correctly leads to the article's webpage.
+    *   **Instructions:**
+        *   After scraping data, go to this tab.
+        *   Click the "Validate DOIs..." button.
+        *   The tool will add a status (`✔️ Match`, `⚠️ Mismatch / 📄 PDF`, `❌ Error`.) to the "Remarks" column for every row in the results table below.
+
+    ### **Viewing and Downloading Results**
+    All your results are collected at the bottom of the page.
+
+    **Combined Results Table**
+    *   **Filtering:** Use the "Filter by DOI Status" dropdown to easily find articles that matched, were PDFs, or had errors. This is very useful after running the validator.
+    *   **Downloading:** Click the "Download All Data as Excel" button at any time to save a complete, numbered, and sorted Excel file of all the articles you have collected in your session.
+    *   **Resetting:** Click the "Reset and Clear All Data" button to clear the results table and start a completely new session.
+    """)
+
+with tab2:
     st.header("Mode 1: Process an Excel file of URLs")
     st.info("Your Excel file must contain a column with the exact header: `Website Link`")
     uploaded_file = st.file_uploader("Choose an Excel file", type=['xlsx', 'xls'])
@@ -234,7 +285,8 @@ with tab1:
                     st.write(f"Found {len(links)} links to process from the file.")
                     st.session_state.summary_file_upload = process_links(links)
     display_summary(st.session_state.summary_file_upload)
-with tab2:
+
+with tab3:
     st.header("Mode 2: Paste Volume/Issue URLs")
     toc_urls_input = st.text_area("Paste one or more URLs here (one per line):", height=150)
     if st.button("Generate from Pasted URLs"):
@@ -246,7 +298,8 @@ with tab2:
                 st.write(f"Found {len(links)} links to process.")
                 st.session_state.summary_paste_url = process_links(links)
     display_summary(st.session_state.summary_paste_url)
-with tab3:
+
+with tab4:
     st.header("DOI Link Validator")
     st.info("This tool will check the 'DOI/Link Updated' for every row in the 'Combined Results Table' and add a validation status to the 'Remarks' column.")
     if not st.session_state.all_results:
@@ -287,16 +340,22 @@ if not st.session_state.all_results:
     st.info("No data has been scraped yet. The results table will appear here.")
 else:
     df = pd.DataFrame(st.session_state.all_results)
+    
+    # --- IMPROVEMENT: Updated Filter Logic ---
     filter_option = st.selectbox(
         "Filter by DOI Status:",
-        ["All", "✔️ Match", "📄 PDF", "❌ Error (Mismatch or Not Found)"]
+        ["All", "✔️ Match", "⚠️ Mismatch / PDF", "❌ Error"]
     )
-    if filter_option == "All": filtered_df = df
-    elif filter_option == "✔️ Match": filtered_df = df[df['Remarks'] == '✔️ Match']
-    elif filter_option == "📄 PDF": filtered_df = df[df['Remarks'] == '📄 PDF']
-    elif filter_option == "❌ Error (Mismatch or Not Found)":
-        filtered_df = df[df['Remarks'].str.contains('Mismatch|Not Found|Error', na=False)]
-    
+
+    if filter_option == "All":
+        filtered_df = df
+    elif filter_option == "✔️ Match":
+        filtered_df = df[df['Remarks'] == '✔️ Match']
+    elif filter_option == "⚠️ Mismatch / PDF":
+        filtered_df = df[df['Remarks'].str.contains('Mismatch|PDF', na=False)]
+    elif filter_option == "❌ Error":
+        filtered_df = df[df['Remarks'].str.contains('Not Found|Error', na=False)]
+
     st.write(f"**Total unique articles collected so far:** {len(st.session_state.all_results)}")
     st.dataframe(filtered_df, column_config={
         "Website Link": st.column_config.LinkColumn(),
