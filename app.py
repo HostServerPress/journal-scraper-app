@@ -170,7 +170,7 @@ st.set_page_config(page_title="Journal Data Extractor", layout="wide")
 st.title("Journal Data Extractor")
 st.markdown("""
 Welcome to the Journal Data Extractor! This tool is designed to streamline the process of collecting academic information from journal websites. 
-- **Two Powerful Modes:** Scrape data by either uploading an Excel file containing a list of URLs, or by pasting one or more 'Table of Contents' links directly.
+- **Two Powerful Modes:** Scrape data by either uploading an Excel file containing a list of URLs, or by pasting one or more 'Volume/Full Issues' links directly.
 - **Accumulate Data:** Add multiple batches of articles to a single session. The results are combined for you.
 - **Validate DOIs:** Use the built-in validator to check if the scraped DOIs correctly lead to the article webpage.
 - **Download Everything:** Export your complete, cleaned, and numbered dataset to a single Excel file at any time.
@@ -389,3 +389,4 @@ if st.button("Reset and Clear All Data"):
     st.session_state.all_results = []; st.session_state.summary_file_upload = {}; st.session_state.summary_paste_url = {}
     st.success("All collected data has been cleared. You can start a new session.")
     st.rerun()
+
