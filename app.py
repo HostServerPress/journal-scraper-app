@@ -176,7 +176,6 @@ Welcome to the Journal Data Extractor! This tool is designed to streamline the p
 - **Download Everything:** Export your complete, cleaned, and numbered dataset to a single Excel file at any time.
 """)
 
-# Initialize all session state variables
 if 'all_results' not in st.session_state: st.session_state.all_results = []
 if 'summary_file_upload' not in st.session_state: st.session_state.summary_file_upload = {}
 if 'summary_paste_url' not in st.session_state: st.session_state.summary_paste_url = {}
@@ -225,11 +224,11 @@ def display_summary(summary):
             for url in summary['failed_links']: st.write(url)
 
 # --- UI Tabs ---
-# --- IMPROVEMENT: Reordered tabs to put User Manual first ---
 tab1, tab2, tab3, tab4 = st.tabs(["User Manual", "Upload Excel File", "Paste Volume URLs", "DOI Validator"])
 
 with tab1:
     st.header("How to Use This Tool")
+    # --- UPDATED USER MANUAL WITH DELETION INSTRUCTIONS ---
     st.markdown("""
     This guide explains how to use the different features of the Journal Data Extractor.
 
@@ -259,17 +258,17 @@ with tab1:
     *   **Instructions:**
         *   After scraping data, go to this tab.
         *   Click the "Validate DOIs..." button.
-        *   The tool will add a status (`✔️ Match`, `⚠️ Mismatch / 📄 PDF`, `❌ Error`.) to the "Remarks" column for every row in the results table below.
+        *   The tool will add a status (✔️ Match, ⚠️ Mismatch / 📄 PDF, ❌ Error) to the "Remarks" column for every row.
 
     ### **Viewing and Downloading Results**
     All your results are collected at the bottom of the page.
 
     **Combined Results Table**
-    *   **Filtering:** Use the "Filter by DOI Status" dropdown to easily find articles that matched, were PDFs, or had errors. This is very useful after running the validator.
-    *   **Downloading:** Click the "Download All Data as Excel" button at any time to save a complete, numbered, and sorted Excel file of all the articles you have collected in your session.
+    *   **Editing & Deleting:** You can directly edit any cell in the table. To delete a row, click on the row's index number on the far left to select it, and then press the **Delete** key on your keyboard.
+    *   **Filtering:** Use the "Filter by DOI Status" dropdown to easily find articles that matched or had errors.
+    *   **Downloading:** Click the "Download All Data as Excel" button at any time to save a complete, numbered, and sorted Excel file.
     *   **Resetting:** Click the "Reset and Clear All Data" button to clear the results table and start a completely new session.
     """)
-
 with tab2:
     st.header("Mode 1: Process an Excel file of URLs")
     st.info("Your Excel file must contain a column with the exact header: `Website Link`")
@@ -285,7 +284,6 @@ with tab2:
                     st.write(f"Found {len(links)} links to process from the file.")
                     st.session_state.summary_file_upload = process_links(links)
     display_summary(st.session_state.summary_file_upload)
-
 with tab3:
     st.header("Mode 2: Paste Volume/Issue URLs")
     toc_urls_input = st.text_area("Paste one or more URLs here (one per line):", height=150)
@@ -295,10 +293,9 @@ with tab3:
             st.warning("Please paste at least one URL.")
         else:
             with st.expander("Show Live Scraping Log", expanded=True):
-                st.write(f"Found {len(links)} links to process.")
+                st.write(f"Found {len(links)} links to process from the file.")
                 st.session_state.summary_paste_url = process_links(links)
     display_summary(st.session_state.summary_paste_url)
-
 with tab4:
     st.header("DOI Link Validator")
     st.info("This tool will check the 'DOI/Link Updated' for every row in the 'Combined Results Table' and add a validation status to the 'Remarks' column.")
@@ -341,52 +338,78 @@ if not st.session_state.all_results:
 else:
     df = pd.DataFrame(st.session_state.all_results)
     
-    # --- IMPROVEMENT: Updated Filter Logic ---
     filter_option = st.selectbox(
         "Filter by DOI Status:",
         ["All", "✔️ Match", "⚠️ Mismatch / PDF", "❌ Error"]
     )
-
-    if filter_option == "All":
-        filtered_df = df
-    elif filter_option == "✔️ Match":
-        filtered_df = df[df['Remarks'] == '✔️ Match']
-    elif filter_option == "⚠️ Mismatch / PDF":
-        filtered_df = df[df['Remarks'].str.contains('Mismatch|PDF', na=False)]
-    elif filter_option == "❌ Error":
-        filtered_df = df[df['Remarks'].str.contains('Not Found|Error', na=False)]
-
+    if filter_option == "All": filtered_df = df
+    elif filter_option == "✔️ Match": filtered_df = df[df['Remarks'] == '✔️ Match']
+    elif filter_option == "⚠️ Mismatch / PDF": filtered_df = df[df['Remarks'].str.contains('Mismatch|PDF', na=False)]
+    elif filter_option == "❌ Error": filtered_df = df[df['Remarks'].str.contains('Not Found|Error', na=False)]
+    
     st.write(f"**Total unique articles collected so far:** {len(st.session_state.all_results)}")
-    st.dataframe(filtered_df, column_config={
-        "Website Link": st.column_config.LinkColumn(),
-        "DOI/Link Updated": st.column_config.LinkColumn()
-    })
+    
+    # --- START OF THE DELETION LOGIC IMPROVEMENT ---
+    st.info("💡 **Tip:** To delete one or more rows, click on their index numbers on the far left to select them, then press the 'Delete' key on your keyboard.")
+    
+    # Create a DataFrame for display that includes a proper index column
+    df_for_display = filtered_df.copy()
+    df_for_display.reset_index(drop=True, inplace=True)
+    df_for_display.insert(0, '#', df_for_display.index + 1)
+
+    # Use the edited data to update the main session state
+    if "data_editor_key" not in st.session_state:
+        st.session_state.data_editor_key = 0
+
+    edited_df = st.data_editor(
+        df_for_display,
+        key=f"editor_{st.session_state.data_editor_key}",
+        column_config={
+            "Website Link": st.column_config.LinkColumn(),
+            "DOI/Link Updated": st.column_config.LinkColumn()
+        },
+        num_rows="dynamic",
+        disabled=['#'] # Make our new index column read-only
+    )
+
+    # Check if a deletion has occurred
+    if len(edited_df) < len(df_for_display):
+        # Identify the links that still exist in the edited table
+        remaining_links = set(edited_df['Website Link'])
+        # Filter the master list to keep only those remaining links
+        st.session_state.all_results = [
+            row for row in st.session_state.all_results if row['Website Link'] in remaining_links
+        ]
+        # Increment the key to force a clean re-render of the editor
+        st.session_state.data_editor_key += 1
+        st.rerun()
+    # --- END OF THE DELETION LOGIC IMPROVEMENT ---
     
     df_to_download = pd.DataFrame(st.session_state.all_results).copy()
-    df_to_download['Year Published'] = pd.to_numeric(df_to_download['Year Published'], errors='coerce')
-    df_to_download.sort_values(by=['Year Published', 'Journal Name', 'Volume'], inplace=True, kind='mergesort')
-    df_to_download['No_Y'] = df_to_download.groupby('Year Published').cumcount() + 1
-    df_to_download['No_J'] = df_to_download.groupby(['Journal Name', 'Volume']).cumcount() + 1
-    final_column_order = [
-        'No_Y', 'No_J', 'Journal Name', 'Year Published', 'Volume', 'Type', 'Page', 
-        'Paper Title', 'Full Authors', 'Abstract', 'Keywords', 'DOI/Link Updated', 
-        'Remarks', 'APA Citation', 'Citation IEEE', 'Website Link'
-    ]
-    df_final_download = df_to_download.reindex(columns=final_column_order)
-    
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df_final_download.to_excel(writer, index=False, sheet_name='ScrapedData')
-    
-    st.download_button(
-        label="Download All Data as Excel",
-        data=output.getvalue(),
-        file_name="scraped_journal_data.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    if not df_to_download.empty:
+        df_to_download['Year Published'] = pd.to_numeric(df_to_download['Year Published'], errors='coerce')
+        df_to_download.sort_values(by=['Year Published', 'Journal Name', 'Volume'], inplace=True, kind='mergesort')
+        df_to_download['No_Y'] = df_to_download.groupby('Year Published').cumcount() + 1
+        df_to_download['No_J'] = df_to_download.groupby(['Journal Name', 'Volume']).cumcount() + 1
+        final_column_order = [
+            'No_Y', 'No_J', 'Journal Name', 'Year Published', 'Volume', 'Type', 'Page', 
+            'Paper Title', 'Full Authors', 'Abstract', 'Keywords', 'DOI/Link Updated', 
+            'Remarks', 'APA Citation', 'Citation IEEE', 'Website Link'
+        ]
+        df_final_download = df_to_download.reindex(columns=final_column_order)
+        
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df_final_download.to_excel(writer, index=False, sheet_name='ScrapedData')
+        
+        st.download_button(
+            label="Download All Data as Excel",
+            data=output.getvalue(),
+            file_name="scraped_journal_data.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 if st.button("Reset and Clear All Data"):
     st.session_state.all_results = []; st.session_state.summary_file_upload = {}; st.session_state.summary_paste_url = {}
     st.success("All collected data has been cleared. You can start a new session.")
     st.rerun()
-
