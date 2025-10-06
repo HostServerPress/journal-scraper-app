@@ -228,7 +228,7 @@ tab1, tab2, tab3, tab4 = st.tabs(["User Manual", "Upload Excel File", "Paste Vol
 
 with tab1:
     st.header("How to Use This Tool")
-    # --- UPDATED USER MANUAL WITH DELETION INSTRUCTIONS ---
+    # --- UPDATED USER MANUAL WITH CORRECT DELETION INSTRUCTIONS ---
     st.markdown("""
     This guide explains how to use the different features of the Journal Data Extractor.
 
@@ -264,11 +264,12 @@ with tab1:
     All your results are collected at the bottom of the page.
 
     **Combined Results Table**
-    *   **Editing & Deleting:** You can directly edit any cell in the table. To delete a row, click on the row's index number on the far left to select it, and then press the **Delete** key on your keyboard.
+    *   **Editing & Deleting:** You can directly edit any cell in the table. To delete a row, click the checkbox on the far left to select it, and then press the **Delete** key on your keyboard.
     *   **Filtering:** Use the "Filter by DOI Status" dropdown to easily find articles that matched or had errors.
     *   **Downloading:** Click the "Download All Data as Excel" button at any time to save a complete, numbered, and sorted Excel file.
     *   **Resetting:** Click the "Reset and Clear All Data" button to clear the results table and start a completely new session.
     """)
+
 with tab2:
     st.header("Mode 1: Process an Excel file of URLs")
     st.info("Your Excel file must contain a column with the exact header: `Website Link`")
@@ -284,6 +285,7 @@ with tab2:
                     st.write(f"Found {len(links)} links to process from the file.")
                     st.session_state.summary_file_upload = process_links(links)
     display_summary(st.session_state.summary_file_upload)
+
 with tab3:
     st.header("Mode 2: Paste Volume/Issue URLs")
     toc_urls_input = st.text_area("Paste one or more URLs here (one per line):", height=150)
@@ -296,6 +298,7 @@ with tab3:
                 st.write(f"Found {len(links)} links to process from the file.")
                 st.session_state.summary_paste_url = process_links(links)
     display_summary(st.session_state.summary_paste_url)
+
 with tab4:
     st.header("DOI Link Validator")
     st.info("This tool will check the 'DOI/Link Updated' for every row in the 'Combined Results Table' and add a validation status to the 'Remarks' column.")
@@ -350,39 +353,31 @@ else:
     st.write(f"**Total unique articles collected so far:** {len(st.session_state.all_results)}")
     
     # --- START OF THE DELETION LOGIC IMPROVEMENT ---
-    st.info("💡 **Tip:** To delete one or more rows, click on their index numbers on the far left to select them, then press the 'Delete' key on your keyboard.")
+    st.info("💡 **Tip:** To delete one or more rows, click the checkboxes on the far left to select them, then press the 'Delete' key on your keyboard.")
     
-    # Create a DataFrame for display that includes a proper index column
+    # Use the filtered DataFrame for display
     df_for_display = filtered_df.copy()
-    df_for_display.reset_index(drop=True, inplace=True)
-    df_for_display.insert(0, '#', df_for_display.index + 1)
-
-    # Use the edited data to update the main session state
-    if "data_editor_key" not in st.session_state:
-        st.session_state.data_editor_key = 0
-
+    
+    # Use st.data_editor with num_rows="dynamic" which enables row deletion
     edited_df = st.data_editor(
         df_for_display,
-        key=f"editor_{st.session_state.data_editor_key}",
         column_config={
             "Website Link": st.column_config.LinkColumn(),
             "DOI/Link Updated": st.column_config.LinkColumn()
         },
         num_rows="dynamic",
-        disabled=['#'] # Make our new index column read-only
+        key="results_editor"
     )
-
-    # Check if a deletion has occurred
+    
+    # When a deletion happens, the 'edited_df' will be shorter than the displayed df.
     if len(edited_df) < len(df_for_display):
         # Identify the links that still exist in the edited table
         remaining_links = set(edited_df['Website Link'])
-        # Filter the master list to keep only those remaining links
+        # Filter the master list in session state to keep only those remaining links
         st.session_state.all_results = [
             row for row in st.session_state.all_results if row['Website Link'] in remaining_links
         ]
-        # Increment the key to force a clean re-render of the editor
-        st.session_state.data_editor_key += 1
-        st.rerun()
+        st.rerun() # Rerun the script to refresh the view
     # --- END OF THE DELETION LOGIC IMPROVEMENT ---
     
     df_to_download = pd.DataFrame(st.session_state.all_results).copy()
