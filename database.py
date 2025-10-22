@@ -46,12 +46,9 @@ def initialize_database():
     ''')
     conn.close()
 
-# --- THIS IS THE FIXED FUNCTION ---
 def add_or_update_article(data_dict):
     """Inserts a new article or replaces an existing one."""
     conn = get_db_connection()
-    
-    # Define the SQL statement with '?' placeholders
     sql_statement = '''
         INSERT OR REPLACE INTO articles (
             "Website Link", "Journal Name", "Paper Title", "Full Authors", "Year Published",
@@ -59,8 +56,6 @@ def add_or_update_article(data_dict):
             "APA Citation", "Citation IEEE", "Remarks"
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     '''
-    
-    # Create a list of arguments in the exact same order as the columns above
     args_list = [
         data_dict.get('Website Link'), data_dict.get('Journal Name'),
         data_dict.get('Paper Title'), data_dict.get('Full Authors'),
@@ -70,23 +65,25 @@ def add_or_update_article(data_dict):
         data_dict.get('DOI/Link Updated'), data_dict.get('APA Citation'),
         data_dict.get('Citation IEEE'), data_dict.get('Remarks', '❓ Not Checked')
     ]
-
-    # Execute with the statement and the list of arguments
     conn.execute(sql_statement, args_list)
     conn.close()
 
-
+# --- FIX #1 IS HERE ---
 def get_all_articles_df():
     """Retrieves all articles and returns them as a DataFrame."""
     conn = get_db_connection()
+    df = pd.DataFrame() # Default to empty
     try:
         rs = conn.execute("SELECT * FROM articles")
-        if not rs.rows:
-            return pd.DataFrame()
-        df = pd.DataFrame.from_records([dict(row) for row in rs.rows])
-    except Exception:
-        df = pd.DataFrame()
-    conn.close()
+        if rs.rows:
+            # Explicitly combine column names with row data for robustness
+            columns = [col.name for col in rs.columns]
+            data = [dict(zip(columns, row)) for row in rs.rows]
+            df = pd.DataFrame(data)
+    except Exception as e:
+        st.error(f"Failed to read data from database: {e}") # Add error for visibility
+    finally:
+        conn.close()
     return df
 
 def update_article_remark(link, remark):
@@ -99,17 +96,22 @@ def update_article_remark(link, remark):
     )
     conn.close()
 
+# --- FIX #2 IS HERE ---
 def get_unchecked_articles_df():
     """Gets only articles that have never been checked."""
     conn = get_db_connection()
+    df = pd.DataFrame() # Default to empty
     try:
         rs = conn.execute("SELECT * FROM articles WHERE Remarks = '❓ Not Checked'")
-        if not rs.rows:
-            return pd.DataFrame()
-        df = pd.DataFrame.from_records([dict(row) for row in rs.rows])
-    except Exception:
-        df = pd.DataFrame()
-    conn.close()
+        if rs.rows:
+            # Explicitly combine column names with row data for robustness
+            columns = [col.name for col in rs.columns]
+            data = [dict(zip(columns, row)) for row in rs.rows]
+            df = pd.DataFrame(data)
+    except Exception as e:
+        st.error(f"Failed to read unchecked data: {e}") # Add error for visibility
+    finally:
+        conn.close()
     return df
 
 def delete_articles_by_link(links_to_delete):
@@ -117,7 +119,6 @@ def delete_articles_by_link(links_to_delete):
     if not links_to_delete: return
     conn = get_db_connection()
     placeholders = ', '.join(['?'] * len(links_to_delete))
-    # Using batch_execute for deletions for consistency, though a single execute would also work
     conn.batch_execute([
         {"stmt": f'DELETE FROM articles WHERE "Website Link" IN ({placeholders})', "args": links_to_delete}
     ])
