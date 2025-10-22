@@ -200,12 +200,11 @@ def discover_article_links(toc_url):
         st.error(f"FAILED to load the Table of Contents page. Error: {e}")
         return []
 
-# --- THIS IS THE NEW HELPER FUNCTION ---
 def _find_pattern(text, patterns):
     for pattern in patterns:
         match = pattern.search(text)
         if match:
-            return match.group(1)
+            return match.group(1).strip() # Use strip() to remove leading/trailing whitespace
     return None
 
 # --- THIS IS THE MODIFIED FUNCTION ---
@@ -214,8 +213,10 @@ def _parse_volume_issue_string(text_string):
     vol_patterns = [
         re.compile(r'(?:Volume|Vol)\.?\s*(\d+)', re.IGNORECASE),
     ]
+    # THE FIX: This pattern now accepts letters, numbers, and spaces
+    # It looks for an alphanumeric block, optionally followed by a space and another one
     iss_patterns = [
-        re.compile(r'(?:Issue|Iss|No)\.?\s*(\d+)', re.IGNORECASE),
+        re.compile(r'(?:Issue|Iss|No)\.?\s*([A-Z0-9]+(?:\s[A-Z0-9]+)?)', re.IGNORECASE),
     ]
 
     # Find volume and issue independently from the text string
@@ -224,7 +225,9 @@ def _parse_volume_issue_string(text_string):
 
     # Combine the results intelligently
     if volume and issue:
-        return f"{volume}({issue})"
+        # Clean up the issue string by removing spaces for formatting
+        issue_formatted = issue.replace(" ", "")
+        return f"{volume}({issue_formatted})"
     elif volume:
         return volume
     else:
@@ -237,7 +240,6 @@ def _extract_volume_from_toc_page(toc_url):
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        # Search for the volume/issue string in a prioritized list of tags
         for tag_name in ['title', 'h1', 'h2', 'h3', 'h4']:
             tag = soup.find(tag_name)
             if tag:
