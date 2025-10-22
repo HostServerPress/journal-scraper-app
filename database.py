@@ -5,18 +5,23 @@ import pandas as pd
 from datetime import date
 import libsql_client
 
-# --- NEW: Function to get the correct database connection ---
+# --- MODIFIED: The get_db_connection function is updated ---
 def get_db_connection():
     """
     Establishes a connection to the database.
     If running on Streamlit Cloud, it connects to Turso.
     Otherwise, it connects to a local SQLite file.
     """
-    # Check if we are in the Streamlit Cloud environment
     if "TURSO_DATABASE_URL" in st.secrets:
         url = st.secrets["TURSO_DATABASE_URL"]
+        
+        # --- THIS IS THE FIX ---
+        # We replace the 'libsql' scheme with 'https', which is more compatible
+        # with the underlying HTTP libraries used for the WebSocket handshake.
+        if url.startswith("libsql://"):
+            url = "https://" + url[len("libsql://"):]
+            
         auth_token = st.secrets["TURSO_AUTH_TOKEN"]
-        # Use the Turso (libSQL) client
         conn = libsql_client.create_client_sync(url=url, auth_token=auth_token)
     else:
         # Fallback to a local file for local development
@@ -28,7 +33,6 @@ def get_db_connection():
 def initialize_database():
     """Creates the 'articles' table if it doesn't already exist."""
     conn = get_db_connection()
-    # The libsql_client uses a slightly different syntax for executing statements
     conn.execute('''
         CREATE TABLE IF NOT EXISTS articles (
             "Website Link" TEXT PRIMARY KEY,
@@ -53,7 +57,6 @@ def initialize_database():
 def add_or_update_article(data_dict):
     """Inserts a new article or replaces an existing one."""
     conn = get_db_connection()
-    # Use named parameters for clarity
     conn.execute(
         statement='''
             INSERT OR REPLACE INTO articles (
@@ -80,6 +83,8 @@ def get_all_articles_df():
     try:
         rs = conn.execute("SELECT * FROM articles")
         # Convert the result set to a list of dictionaries, then to a DataFrame
+        if not rs.rows:
+            return pd.DataFrame() # Return empty dataframe if no rows
         df = pd.DataFrame.from_records([dict(row) for row in rs.rows])
     except Exception:
         df = pd.DataFrame()
@@ -101,6 +106,8 @@ def get_unchecked_articles_df():
     conn = get_db_connection()
     try:
         rs = conn.execute("SELECT * FROM articles WHERE Remarks = '❓ Not Checked'")
+        if not rs.rows:
+            return pd.DataFrame() # Return empty dataframe if no rows
         df = pd.DataFrame.from_records([dict(row) for row in rs.rows])
     except Exception:
         df = pd.DataFrame()
