@@ -178,7 +178,6 @@ def scrape_website(url, pre_scraped_volume_issue=None):
     except Exception as e:
         st.warning(f"  - ✗ FAILED to scrape {url}. Error: {e}"); return None
 
-# --- THIS IS THE MODIFIED FUNCTION ---
 def discover_article_links(toc_url):
     st.info(f"Discovering links from: {toc_url}")
     selectors_to_try = [
@@ -193,7 +192,6 @@ def discover_article_links(toc_url):
         for selector in selectors_to_try:
             article_links = [a['href'] for a in soup.select(selector)]
             if article_links:
-                # THE FIX: Simplified log message
                 st.success(f"  - Found {len(article_links)} article links.")
                 return article_links
         st.warning("  - No article links found. The website structure may be new or unsupported.")
@@ -202,21 +200,35 @@ def discover_article_links(toc_url):
         st.error(f"FAILED to load the Table of Contents page. Error: {e}")
         return []
 
+# --- THIS IS THE NEW HELPER FUNCTION ---
+def _find_pattern(text, patterns):
+    for pattern in patterns:
+        match = pattern.search(text)
+        if match:
+            return match.group(1)
+    return None
+
+# --- THIS IS THE MODIFIED FUNCTION ---
 def _parse_volume_issue_string(text_string):
-    patterns = [
-        re.compile(r'Vol\.?\s*(\d+),\s*No\.?\s*(\d+)', re.IGNORECASE),
-        re.compile(r'Volume\s*(\d+)\s*Issue\s*(\d+)', re.IGNORECASE),
+    # Define separate patterns for volume and issue to find them independently
+    vol_patterns = [
         re.compile(r'(?:Volume|Vol)\.?\s*(\d+)', re.IGNORECASE),
     ]
-    for pattern in patterns:
-        match = pattern.search(text_string)
-        if match:
-            groups = match.groups()
-            if len(groups) == 2:
-                return f"{groups[0]}({groups[1]})"
-            elif len(groups) == 1:
-                return groups[0]
-    return None
+    iss_patterns = [
+        re.compile(r'(?:Issue|Iss|No)\.?\s*(\d+)', re.IGNORECASE),
+    ]
+
+    # Find volume and issue independently from the text string
+    volume = _find_pattern(text_string, vol_patterns)
+    issue = _find_pattern(text_string, iss_patterns)
+
+    # Combine the results intelligently
+    if volume and issue:
+        return f"{volume}({issue})"
+    elif volume:
+        return volume
+    else:
+        return None
 
 def _extract_volume_from_toc_page(toc_url):
     headers = {'User-Agent': 'My-DOI-Scraper-Bot/1.0'}
@@ -224,12 +236,15 @@ def _extract_volume_from_toc_page(toc_url):
         response = requests.get(toc_url, headers=headers, timeout=20)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Search for the volume/issue string in a prioritized list of tags
         for tag_name in ['title', 'h1', 'h2', 'h3', 'h4']:
             tag = soup.find(tag_name)
             if tag:
                 parsed_text = _parse_volume_issue_string(tag.get_text(strip=True))
                 if parsed_text:
                     return parsed_text
+                    
         return "Volume Not Found (from TOC)"
     except Exception as e:
         st.warning(f"  - ✗ FAILED to extract volume from TOC {toc_url}. Error: {e}");
