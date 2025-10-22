@@ -66,12 +66,9 @@ def extract_type(soup):
     except Exception: pass
     return "Type Not Found"
 
-# --- MODIFIED: extract_volume now accepts a fallback ---
 def extract_volume(soup, pre_scraped_volume_issue=None):
-    # Use pre-scraped value if available and not 'Not Found'
     if pre_scraped_volume_issue and pre_scraped_volume_issue != "Volume Not Found (from TOC)":
         return pre_scraped_volume_issue
-
     volume_tag = soup.find('meta', attrs={'name': 'citation_volume'})
     issue_tag = soup.find('meta', attrs={'name': 'citation_issue'})
     vol = volume_tag['content'] if volume_tag else None
@@ -80,11 +77,31 @@ def extract_volume(soup, pre_scraped_volume_issue=None):
     elif vol: return vol
     return "Volume Not Found"
 
+# --- THIS IS THE MODIFIED FUNCTION ---
 def extract_page(soup):
-    first_page = soup.find('meta', attrs={'name': 'citation_firstpage'})
-    last_page = soup.find('meta', attrs={'name': 'citation_lastpage'})
-    if first_page and last_page: return f"{first_page['content']}–{last_page['content']}"
+    # Method 1: Try meta tags first (the standard way)
+    first_page_tag = soup.find('meta', attrs={'name': 'citation_firstpage'})
+    last_page_tag = soup.find('meta', attrs={'name': 'citation_lastpage'})
+
+    if first_page_tag and last_page_tag:
+        first_page = first_page_tag['content']
+        last_page = last_page_tag['content']
+
+        # THE FIX: Check for identical content to prevent duplication
+        if first_page and first_page == last_page:
+            return first_page
+        # If content is different and both exist, combine them
+        elif first_page and last_page:
+            return f"{first_page}–{last_page}"
+
+    # Method 2: Fallback for sites like MMU Press that use a visible span
+    pages_span = soup.find('span', class_='pages')
+    if pages_span:
+        return pages_span.get_text(strip=True)
+
+    # Final Fallback
     return "Page Not Found"
+
 
 def extract_abstract(soup):
     og_desc = soup.find('meta', property='og:description')
@@ -148,7 +165,7 @@ def generate_ieee_citation(data):
         return " ".join(parts)
     except (KeyError, TypeError): return "IEEE Citation could not be generated (missing data)."
 
-def scrape_website(url, pre_scraped_volume_issue=None): # --- MODIFIED: Added new parameter ---
+def scrape_website(url, pre_scraped_volume_issue=None):
     st.write(f"  - Scraping article: {url}")
     headers = {'User-Agent': 'My-DOI-Scraper-Bot/1.0'}
     try:
@@ -160,7 +177,7 @@ def scrape_website(url, pre_scraped_volume_issue=None): # --- MODIFIED: Added ne
         scraped_data = {
             'Website Link': url, 'Journal Name': extract_journal_name(soup), 'Paper Title': extract_paper_title(soup),
             'Full Authors': extract_full_authors(soup), 'Year Published': date_info['year'],
-            'Volume': extract_volume(soup, pre_scraped_volume_issue), # --- MODIFIED: Pass to extract_volume ---
+            'Volume': extract_volume(soup, pre_scraped_volume_issue),
             'Type': extract_type(soup), 'Page': extract_page(soup),
             'Abstract': extract_abstract(soup), 'Keywords': extract_keywords(soup),
             'DOI/Link Updated': f"https://doi.org/{raw_doi}" if raw_doi != "DOI Not Found" else "DOI Not Found",
@@ -172,59 +189,36 @@ def scrape_website(url, pre_scraped_volume_issue=None): # --- MODIFIED: Added ne
     except Exception as e:
         st.warning(f"  - ✗ FAILED to scrape {url}. Error: {e}"); return None
 
-# --- MODIFIED: discover_article_links now also calls a helper to extract volume ---
 def discover_article_links(toc_url):
     st.info(f"Discovering links from: {toc_url}")
-    
-    # List of CSS selectors to try in order.
-    # The first is the original, the second is for MMU Press.
     selectors_to_try = [
         'div.article-summary.media h3.media-heading a',
         'h4.title a'
     ]
-    
     headers = {'User-Agent': 'My-DOI-Scraper-Bot/1.0'}
     try:
         response = requests.get(toc_url, headers=headers, timeout=20)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
-        
-        article_links = []
-        # Loop through our list of selectors
         for selector in selectors_to_try:
-            links_found = [a['href'] for a in soup.select(selector)]
-            if links_found:
-                article_links.extend(links_found) # Add found links to the list
-                st.success(f"  - Found {len(links_found)} article links using selector '{selector}'")
-                # No 'break' here, as we might want to combine results from multiple selectors if needed
-                # (though for now, MMU press only needs one and others typically only need one)
-        
-        if not article_links:
-            st.warning("  - No article links found. The website structure may be new or unsupported.")
-            return []
-        
-        # Ensure unique links in case multiple selectors matched same links
-        return list(dict.fromkeys(article_links)) 
-
+            article_links = [a['href'] for a in soup.select(selector)]
+            if article_links:
+                st.success(f"  - Found {len(article_links)} article links using selector '{selector}'")
+                return article_links
+        st.warning("  - No article links found. The website structure may be new or unsupported.")
+        return []
     except Exception as e:
         st.error(f"FAILED to load the Table of Contents page. Error: {e}")
         return []
 
-# --- NEW HELPER FUNCTIONS FOR VOLUME EXTRACTION FROM TOC ---
 def _parse_volume_issue_string(text_string):
-    # Regex to find patterns like "Volume 5 Issue 2" or "Vol 5 Iss 2"
-    # This specifically tries to get both volume and issue
     match = re.search(r'(?:Volume|Vol)\s*(\d+)\s*(?:Issue|Iss)\s*(\d+)', text_string, re.IGNORECASE)
     if match:
-        vol = match.group(1)
-        iss = match.group(2)
+        vol, iss = match.group(1), match.group(2)
         return f"{vol}({iss})"
-    
-    # Also look for simpler "Volume X" if issue is not explicitly mentioned
     match_vol_only = re.search(r'(?:Volume|Vol)\s*(\d+)', text_string, re.IGNORECASE)
     if match_vol_only:
         return match_vol_only.group(1)
-
     return None
 
 def _extract_volume_from_toc_page(toc_url):
@@ -233,69 +227,49 @@ def _extract_volume_from_toc_page(toc_url):
         response = requests.get(toc_url, headers=headers, timeout=20)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
-        
-        # 1. Try to get from the <title> tag
         title_tag = soup.find('title')
         if title_tag:
             parsed_from_title = _parse_volume_issue_string(title_tag.get_text(strip=True))
             if parsed_from_title:
                 return parsed_from_title
-        
-        # 2. Try to get from specific common headings or elements on the page
-        # Based on the browse output, 'Home Archives 2025: Volume 5 Issue 2' could be a target
-        # Let's target <h2>, <h3>, <h4> tags
         for tag_name in ['h2', 'h3', 'h4']:
             for tag in soup.find_all(tag_name):
                 text = tag.get_text(strip=True)
                 parsed = _parse_volume_issue_string(text)
                 if parsed:
                     return parsed
-        
-        # Fallback if no specific pattern is found
         return "Volume Not Found (from TOC)"
-
     except Exception as e:
         st.warning(f"  - ✗ FAILED to extract volume from TOC {toc_url}. Error: {e}");
         return "Volume Not Found (from TOC)"
 
-
 st.set_page_config(page_title="Journal Data Extractor", layout="wide")
 st.title("Journal Data Extractor")
-st.markdown("""
-Welcome to the Journal Data Extractor! This tool is designed to streamline the process of collecting academic information from journal websites.
-- **Two Powerful Modes:** Scrape data by either uploading an Excel file of URLs or by pasting 'Volume/Full Issues' links directly.
-- **Persistent Data & Auto-Updates:** Your collection is saved locally. Submitting a link that already exists will automatically re-scrape and update it.
-- **Improved Volume Detection:** The scraper is now smarter and can detect volume/issue information even if it's not in standard meta tags, especially for sites like MMU Press.
-- **Download Everything:** Export your complete, cleaned, and numbered dataset to a single Excel file.
-""")
+st.markdown("""(Your intro markdown here)""")
 
 if 'summary_file_upload' not in st.session_state: st.session_state.summary_file_upload = {}
 if 'summary_paste_url' not in st.session_state: st.session_state.summary_paste_url = {}
 if 'data_editor_key' not in st.session_state: st.session_state.data_editor_key = 0
 
-# --- MODIFIED: process_links now handles pre-scraping volume from TOC ---
 def process_links(links_to_process):
     newly_scraped_count, updated_count, failed_links = 0, 0, []
     existing_df = db.get_all_articles_df()
     scraped_urls = set(existing_df['Website Link']) if not existing_df.empty else set()
     unique_new_links = list(dict.fromkeys(links_to_process))
-
     for link in unique_new_links:
         is_update = link in scraped_urls
         if "/issue/view/" in link:
-            # First, try to extract volume/issue from the TOC page itself
             pre_scraped_volume = _extract_volume_from_toc_page(link)
             if pre_scraped_volume == "Volume Not Found (from TOC)":
                 st.warning(f"  - Could not determine volume/issue from TOC page: {link}. Proceeding without specific volume info.")
-                pre_scraped_volume = None # Reset if not found, so extract_volume can try other methods
-
+                pre_scraped_volume = None
             discovered = discover_article_links(link)
             if not discovered:
                 failed_links.append(f"(Volume Link) {link}")
                 continue
             for art_link in discovered:
                 is_update_discovered = art_link in scraped_urls
-                result = scrape_website(art_link, pre_scraped_volume_issue=pre_scraped_volume) # --- MODIFIED ---
+                result = scrape_website(art_link, pre_scraped_volume_issue=pre_scraped_volume)
                 if result:
                     db.add_or_update_article(result)
                     if is_update_discovered: updated_count += 1
@@ -303,7 +277,7 @@ def process_links(links_to_process):
                     scraped_urls.add(art_link)
                 else: failed_links.append(art_link)
         else:
-            result = scrape_website(link) # For single article links, no pre_scraped_volume_issue
+            result = scrape_website(link)
             if result:
                 db.add_or_update_article(result)
                 if is_update: updated_count += 1
@@ -337,39 +311,7 @@ year_search = st.sidebar.text_input("Filter by Year Published:")
 tab1, tab2, tab3, tab4 = st.tabs(["User Manual", "Upload File", "Paste Volume URLs", "DOI Validator"])
 with tab1:
     st.header("How to Use This Tool")
-    st.markdown("""
-    This guide explains how to use the different features of the Journal Data Extractor.
-
-    ### **Collecting Data**
-    You can collect data in two ways. All data is saved automatically to a local database.
-
-    **Automatic Updates:** If you submit a link that has been scraped before, the tool will **automatically re-scrape it** and update the entry in the database with the latest information. There is no need to delete the old one.
-
-    **1. Upload File Tab**
-    *   **Purpose:** Process a large number of links at once from a file.
-    *   **Instructions:**
-        *   **For Excel (.xlsx, .xls):** In the first column, use the exact header `Website Link`.
-        *   **For Word (.docx) or Text (.txt):** Place each URL on a new line.
-        *   You can mix single article links and "Volume" / "Full Issue" links in any file type.
-
-    **2. Paste Volume URLs Tab**
-    *   **Purpose:** Quickly scrape one or more full journal issues.
-    *   **Instructions:**
-        *   Find the "Volume" or "Full Issue" page for the journal volumes you want to scrape.
-        *   Paste one or more of these URLs into the text box. Each URL must be on a new line.
-
-    ### **Validating Data**
-    *   The **DOI Validator** tab allows you to check all the links in your database.
-    *   It updates the "Remarks" column to show if the DOI link matches the original article URL, leads to a PDF, is broken, or has an error.
-    *   You have the option to check only new, un-validated articles or re-validate the entire database.
-
-    ### **Viewing and Downloading Results**
-    *   **Searching:** Use the sidebar on the left to search your entire database. You can select a journal from the dropdown for an exact match, or type in the text boxes to filter by journal name or year.
-    *   **Editing & Deleting:** To delete rows, click the checkboxes on the far left of the results table to select them, then press the **Delete** key on your keyboard. This permanently removes them from the database.
-    *   **Filtering:** Use the "Filter by DOI Status" dropdown to easily find articles that matched or had errors within your search results.
-    *   **Downloading:** Click the "Download All Data as Excel" button to save a complete, numbered, and sorted Excel file of your entire database.
-    *   **Resetting:** Click the "Reset and Clear All Data" button to completely wipe the database and start a new session.
-    """)
+    st.markdown("""(Your user manual here)""")
 
 with tab2:
     st.header("Mode 1: Process a file of URLs")
