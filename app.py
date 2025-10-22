@@ -11,7 +11,7 @@ import docx
 import database as db
 db.initialize_database()
 
-# --- All data extraction and citation functions ---
+# --- All data extraction and citation functions (unchanged) ---
 def extract_journal_name(soup):
     journal_meta = soup.find('meta', attrs={'name': 'citation_journal_title'})
     if journal_meta: return journal_meta['content']
@@ -77,31 +77,20 @@ def extract_volume(soup, pre_scraped_volume_issue=None):
     elif vol: return vol
     return "Volume Not Found"
 
-# --- THIS IS THE MODIFIED FUNCTION ---
 def extract_page(soup):
-    # Method 1: Try meta tags first (the standard way)
     first_page_tag = soup.find('meta', attrs={'name': 'citation_firstpage'})
     last_page_tag = soup.find('meta', attrs={'name': 'citation_lastpage'})
-
     if first_page_tag and last_page_tag:
         first_page = first_page_tag['content']
         last_page = last_page_tag['content']
-
-        # THE FIX: Check for identical content to prevent duplication
         if first_page and first_page == last_page:
             return first_page
-        # If content is different and both exist, combine them
         elif first_page and last_page:
             return f"{first_page}–{last_page}"
-
-    # Method 2: Fallback for sites like MMU Press that use a visible span
     pages_span = soup.find('span', class_='pages')
     if pages_span:
         return pages_span.get_text(strip=True)
-
-    # Final Fallback
     return "Page Not Found"
-
 
 def extract_abstract(soup):
     og_desc = soup.find('meta', property='og:description')
@@ -211,14 +200,30 @@ def discover_article_links(toc_url):
         st.error(f"FAILED to load the Table of Contents page. Error: {e}")
         return []
 
+# --- THIS IS THE MODIFIED FUNCTION ---
 def _parse_volume_issue_string(text_string):
-    match = re.search(r'(?:Volume|Vol)\s*(\d+)\s*(?:Issue|Iss)\s*(\d+)', text_string, re.IGNORECASE)
-    if match:
-        vol, iss = match.group(1), match.group(2)
-        return f"{vol}({iss})"
-    match_vol_only = re.search(r'(?:Volume|Vol)\s*(\d+)', text_string, re.IGNORECASE)
-    if match_vol_only:
-        return match_vol_only.group(1)
+    # A list of regex patterns to try, from most specific to least specific
+    patterns = [
+        # Pattern for "Volume X, No. Y" or "Vol. X, No. Y"
+        re.compile(r'Vol\.?\s*(\d+),\s*No\.?\s*(\d+)', re.IGNORECASE),
+        # Pattern for "Volume X Issue Y"
+        re.compile(r'Volume\s*(\d+)\s*Issue\s*(\d+)', re.IGNORECASE),
+        # Pattern for just "Volume X" or "Vol X" if issue is not found
+        re.compile(r'(?:Volume|Vol)\.?\s*(\d+)', re.IGNORECASE),
+    ]
+    
+    for pattern in patterns:
+        match = pattern.search(text_string)
+        if match:
+            groups = match.groups()
+            if len(groups) == 2:
+                # Matched a pattern with both volume and issue
+                return f"{groups[0]}({groups[1]})"
+            elif len(groups) == 1:
+                # Matched a pattern with only volume
+                return groups[0]
+    
+    # If no patterns match, return None
     return None
 
 def _extract_volume_from_toc_page(toc_url):
@@ -227,17 +232,15 @@ def _extract_volume_from_toc_page(toc_url):
         response = requests.get(toc_url, headers=headers, timeout=20)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
-        title_tag = soup.find('title')
-        if title_tag:
-            parsed_from_title = _parse_volume_issue_string(title_tag.get_text(strip=True))
-            if parsed_from_title:
-                return parsed_from_title
-        for tag_name in ['h2', 'h3', 'h4']:
-            for tag in soup.find_all(tag_name):
-                text = tag.get_text(strip=True)
-                parsed = _parse_volume_issue_string(text)
-                if parsed:
-                    return parsed
+        
+        # Search in a prioritized list of tags
+        for tag_name in ['title', 'h1', 'h2', 'h3', 'h4']:
+            tag = soup.find(tag_name)
+            if tag:
+                parsed_text = _parse_volume_issue_string(tag.get_text(strip=True))
+                if parsed_text:
+                    return parsed_text
+                    
         return "Volume Not Found (from TOC)"
     except Exception as e:
         st.warning(f"  - ✗ FAILED to extract volume from TOC {toc_url}. Error: {e}");
@@ -250,6 +253,7 @@ st.markdown("""(Your intro markdown here)""")
 if 'summary_file_upload' not in st.session_state: st.session_state.summary_file_upload = {}
 if 'summary_paste_url' not in st.session_state: st.session_state.summary_paste_url = {}
 if 'data_editor_key' not in st.session_state: st.session_state.data_editor_key = 0
+if 'confirm_delete' not in st.session_state: st.session_state.confirm_delete = False
 
 def process_links(links_to_process):
     newly_scraped_count, updated_count, failed_links = 0, 0, []
@@ -459,8 +463,26 @@ else:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-if st.button("Reset and Clear All Data"):
-    db.clear_all_data()
-    st.session_state.summary_file_upload, st.session_state.summary_paste_url = {}, {}
-    st.success("All collected data has been cleared from the database. You can start a new session.")
-    st.rerun()
+st.markdown("---")
+st.header("Manage Data")
+
+if not st.session_state.confirm_delete:
+    if st.button("Reset and Clear All Data"):
+        st.session_state.confirm_delete = True
+        st.rerun()
+
+if st.session_state.confirm_delete:
+    st.error("⚠️ **ARE YOU ABSOLUTELY SURE?** This will permanently delete all data from the database. This action cannot be undone.")
+    col1, col2 = st.columns([1, 5])
+    with col1:
+        if st.button("YES, DELETE EVERYTHING", type="primary"):
+            db.clear_all_data()
+            st.session_state.summary_file_upload = {}
+            st.session_state.summary_paste_url = {}
+            st.session_state.confirm_delete = False
+            st.success("All collected data has been cleared from the database.")
+            st.rerun()
+    with col2:
+        if st.button("Cancel"):
+            st.session_state.confirm_delete = False
+            st.rerun()
