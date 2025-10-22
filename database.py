@@ -76,12 +76,11 @@ def get_all_articles_df():
     try:
         rs = conn.execute("SELECT * FROM articles")
         if rs.rows:
-            # Explicitly combine column names with row data for robustness
-            columns = [col.name for col in rs.columns]
-            data = [dict(zip(columns, row)) for row in rs.rows]
-            df = pd.DataFrame(data)
+            # The rs.columns property is a simple tuple of strings.
+            # We can pass rs.rows and rs.columns directly to the DataFrame constructor.
+            df = pd.DataFrame(rs.rows, columns=rs.columns)
     except Exception as e:
-        st.error(f"Failed to read data from database: {e}") # Add error for visibility
+        st.error(f"Failed to read data from database: {e}")
     finally:
         conn.close()
     return df
@@ -104,12 +103,11 @@ def get_unchecked_articles_df():
     try:
         rs = conn.execute("SELECT * FROM articles WHERE Remarks = '❓ Not Checked'")
         if rs.rows:
-            # Explicitly combine column names with row data for robustness
-            columns = [col.name for col in rs.columns]
-            data = [dict(zip(columns, row)) for row in rs.rows]
-            df = pd.DataFrame(data)
+            # The rs.columns property is a simple tuple of strings.
+            # We can pass rs.rows and rs.columns directly to the DataFrame constructor.
+            df = pd.DataFrame(rs.rows, columns=rs.columns)
     except Exception as e:
-        st.error(f"Failed to read unchecked data: {e}") # Add error for visibility
+        st.error(f"Failed to read unchecked data: {e}")
     finally:
         conn.close()
     return df
